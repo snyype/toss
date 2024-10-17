@@ -1,7 +1,7 @@
 # Toss
 
   <div align="center">
-    <img src="https://github.com/snyype/toss/blob/main/toss.png" alt="Toss by Snype" width="500"/>
+    <img src="https://github.com/snyype/toss/blob/main/Toss.png" alt="Toss by Snype" width="500"/>
 </div>
 
 **Toss** is a lightweight command-line tool designed to simplify file sharing over a local network. With Toss, you can quickly make files available for download from any device on the same network for a specified duration.
