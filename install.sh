@@ -11,7 +11,7 @@ elif [[ "$OS_TYPE" == "Darwin" ]]; then
     DESTINATION="$HOME/.local/bin/toss"
 elif [[ "$OS_TYPE" == "CYGWIN"* || "$OS_TYPE" == "MINGW"* || "$OS_TYPE" == "MSYS"* ]]; then
     EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/win-1.0.0/toss.exe"
-    DESTINATION="$USERPROFILE/toss.exe"
+    DESTINATION="/c/toss/toss.exe"  # Change this line to your desired path
 else
     echo "Unsupported OS: $OS_TYPE"
     exit 1
@@ -29,21 +29,17 @@ if [[ "$OS_TYPE" != "CYGWIN"* && "$OS_TYPE" != "MINGW"* && "$OS_TYPE" != "MSYS"*
     chmod +x "$DESTINATION"
 fi
 
-# Add to PATH if not already present
-if [[ "$SHELL" == *"bash"* ]]; then
-    if ! grep -q ".local/bin" "$HOME/.bashrc"; then
-        echo "export PATH=\$PATH:\$HOME/.local/bin" >> "$HOME/.bashrc"
-        echo "Toss installed successfully. Please restart your terminal or run 'source ~/.bashrc' to use it."
+# Add to PATH if not already present for Windows
+if [[ "$OS_TYPE" == "CYGWIN"* || "$OS_TYPE" == "MINGW"* || "$OS_TYPE" == "MSYS"* ]]; then
+    # Check if the path is already in PATH
+    if ! echo "$PATH" | grep -q "/c/toss"; then
+        # Add C:\toss to the Windows PATH
+        REG ADD "HKCU\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path /t REG_EXPAND_SZ /d "$PATH;C:\toss" /f
+        echo "C:\\toss has been added to your PATH. Please restart your terminal for the changes to take effect."
     else
-        echo "Toss installed successfully. Please restart your terminal to use it."
+        echo "C:\\toss is already in your PATH."
     fi
-elif [[ "$SHELL" == *"zsh"* ]]; then
-    if ! grep -q ".local/bin" "$HOME/.zshrc"; then
-        echo "export PATH=\$PATH:\$HOME/.local/bin" >> "$HOME/.zshrc"
-        echo "Toss installed successfully. Please restart your terminal or run 'source ~/.zshrc' to use it."
-    else
-        echo "Toss installed successfully. Please restart your terminal to use it."
-    fi
-else
-    echo "Toss installed successfully. Please add ~/.local/bin to your PATH manually."
 fi
+
+# Inform user of successful installation
+echo "Toss installed successfully."
