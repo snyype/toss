@@ -33,8 +33,8 @@ fi
 if [[ "$OS_TYPE" == "CYGWIN"* || "$OS_TYPE" == "MINGW"* || "$OS_TYPE" == "MSYS"* ]]; then
     # Check if the path is already in PATH
     if ! echo "$PATH" | grep -q "/c/toss"; then
-        # Add C:\toss to the Windows PATH
-        powershell.exe -Command "Set-ItemProperty -Path 'HKCU:\System\CurrentControlSet\Control\Session Manager\Environment' -Name 'Path' -Value '\$Env:Path;C:\toss' -Force"
+        # Add C:\toss to the Windows PATH using cmd.exe
+        cmd.exe /C "SETX PATH \"%PATH%;C:\\toss\" /M"
         echo "C:\\toss has been added to your PATH. Please restart your terminal for the changes to take effect."
     else
         echo "C:\\toss is already in your PATH."
