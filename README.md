@@ -10,37 +10,12 @@
 
 ## Installation
 
-### Step 1: Clone the Repository
-
-```css
-git clone https://github.com/YOUR_USERNAME/toss.git
-cd toss
-```
-
-Step 2: Build the Executable
-Run the following command to build the Toss executable:
-
-For Linux/macOS:
-
-```css
-go build -o toss
-```
-For Windows users, build with:
-```css
-go build -o toss.exe
-```
-
-Step 3: Add Toss to Your PATH
-
-On Windows:
-
-- Search for "Environment Variables" in the Start menu.
-- Edit the "Path" variable to include the directory containing toss.exe.
-- On Linux/macOS: Add the following line to your ~/.bashrc or ~/.zshrc:
+You can install Toss with the following command:
 
 ```
-export PATH=$PATH:/path/to/toss-directory
+curl -o- https://raw.githubusercontent.com/snyype/toss/main/install.sh | bash
 ```
+
 # Usage
 Run the command with the desired file and an optional duration:
 
