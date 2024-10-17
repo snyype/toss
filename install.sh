@@ -4,10 +4,10 @@
 OS_TYPE=$(uname)
 
 if [[ "$OS_TYPE" == "Linux" ]]; then
-    EXECUTABLE_URL="https://github.com/snyype/toss/releases/latest/download/toss"
+    EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/unix-1.0.0/toss"
     DESTINATION="$HOME/.local/bin/toss"
 elif [[ "$OS_TYPE" == "Darwin" ]]; then
-    EXECUTABLE_URL="https://github.com/snyype/toss/releases/latest/download/toss"
+    EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/unix-1.0.0/toss"
     DESTINATION="$HOME/.local/bin/toss"
 elif [[ "$OS_TYPE" == "CYGWIN"* || "$OS_TYPE" == "MINGW"* || "$OS_TYPE" == "MSYS"* ]]; then
     EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/win-1.0.0/toss.exe"
