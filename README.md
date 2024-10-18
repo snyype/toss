@@ -23,6 +23,9 @@ curl -o- https://raw.githubusercontent.com/snyype/toss/main/install.sh | bash
 # Usage
 Run the command with the desired file and an optional duration:
 
+<div>
+    <img src="https://github.com/snyype/toss/blob/main/toss-terminal.png" alt="Toss in terminal" width="500"/>
+</div>
 
 ```
 toss -t 300 myfile.txt
