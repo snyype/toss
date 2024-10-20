@@ -4,7 +4,7 @@
 OS_TYPE=$(uname)
 
 if [[ "$OS_TYPE" == "Linux" ]]; then
-    EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/unix-1.0.0/toss"
+    EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/linux-1.0.0/toss"
     DESTINATION="$HOME/.local/bin/toss"
 
     # Create destination directory if it doesn't exist
