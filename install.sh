@@ -28,7 +28,7 @@ if [[ "$OS_TYPE" == "Linux" ]]; then
     exit 0
 
 elif [[ "$OS_TYPE" == "Darwin" ]]; then
-    EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/unix-1.0.0/toss"
+    EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/darwin-1.0.0/toss"
     DESTINATION="$HOME/.local/bin/toss"
 
     # Create destination directory if it doesn't exist
@@ -50,7 +50,7 @@ elif [[ "$OS_TYPE" == "Darwin" ]]; then
 
     echo "Toss installed successfully. Use the command 'toss' to start using it."
     exit 0
-    
+
 elif [[ "$OS_TYPE" == "CYGWIN"* || "$OS_TYPE" == "MINGW"* || "$OS_TYPE" == "MSYS"* ]]; then
     EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/win-1.0.0/toss.exe"
     DESTINATION="C:/toss/toss.exe"  # Set destination for Windows
