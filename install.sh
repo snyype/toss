@@ -6,9 +6,49 @@ OS_TYPE=$(uname)
 if [[ "$OS_TYPE" == "Linux" ]]; then
     EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/unix-1.0.0/toss"
     DESTINATION="$HOME/.local/bin/toss"
+
+    # Create destination directory if it doesn't exist
+    mkdir -p "$HOME/.local/bin"
+
+    # Download the Toss executable
+    echo "Downloading Toss..."
+    curl -L "$EXECUTABLE_URL" -o "$DESTINATION"
+
+    # Make the file executable
+    chmod +x "$DESTINATION"
+
+    # Add to current PATH if it's not already included
+    if ! [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+        echo "Adding $HOME/.local/bin to current PATH..."
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+        export PATH="$HOME/.local/bin:$PATH"  # Update current session PATH
+    fi
+
+    echo "Toss installed successfully. Use the command 'toss' to start using it."
+    exit 0
 elif [[ "$OS_TYPE" == "Darwin" ]]; then
     EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/unix-1.0.0/toss"
     DESTINATION="$HOME/.local/bin/toss"
+
+    # Create destination directory if it doesn't exist
+    mkdir -p "$HOME/.local/bin"
+
+    # Download the Toss executable
+    echo "Downloading Toss..."
+    curl -L "$EXECUTABLE_URL" -o "$DESTINATION"
+
+    # Make the file executable
+    chmod +x "$DESTINATION"
+
+    # Add to current PATH if it's not already included
+    if ! [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+        echo "Adding $HOME/.local/bin to current PATH..."
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bash_profile"
+        export PATH="$HOME/.local/bin:$PATH"  # Update current session PATH
+    fi
+
+    echo "Toss installed successfully. Use the command 'toss' to start using it."
+    exit 0
 elif [[ "$OS_TYPE" == "CYGWIN"* || "$OS_TYPE" == "MINGW"* || "$OS_TYPE" == "MSYS"* ]]; then
     EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/win-1.0.0/toss.exe"
     DESTINATION="C:/toss/toss.exe"  # Set destination for Windows
@@ -34,5 +74,5 @@ elif [[ "$OS_TYPE" == "CYGWIN"* || "$OS_TYPE" == "MINGW"* || "$OS_TYPE" == "MSYS
     exit 0
 else
     echo "Unsupported OS: $OS_TYPE"
-    exit 1
+    exit 1  
 fi
