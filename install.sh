@@ -26,6 +26,7 @@ if [[ "$OS_TYPE" == "Linux" ]]; then
 
     echo "Toss installed successfully. Use the command 'toss' to start using it."
     exit 0
+
 elif [[ "$OS_TYPE" == "Darwin" ]]; then
     EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/unix-1.0.0/toss"
     DESTINATION="$HOME/.local/bin/toss"
@@ -43,12 +44,13 @@ elif [[ "$OS_TYPE" == "Darwin" ]]; then
     # Add to current PATH if it's not already included
     if ! [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
         echo "Adding $HOME/.local/bin to current PATH..."
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bash_profile"
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"  # Updated for zsh
         export PATH="$HOME/.local/bin:$PATH"  # Update current session PATH
     fi
 
     echo "Toss installed successfully. Use the command 'toss' to start using it."
     exit 0
+    
 elif [[ "$OS_TYPE" == "CYGWIN"* || "$OS_TYPE" == "MINGW"* || "$OS_TYPE" == "MSYS"* ]]; then
     EXECUTABLE_URL="https://github.com/snyype/toss/releases/download/win-1.0.0/toss.exe"
     DESTINATION="C:/toss/toss.exe"  # Set destination for Windows
