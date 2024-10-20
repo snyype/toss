@@ -25,9 +25,11 @@ func main() {
 	// Define command-line flags
 	var duration int
 	var showVersion bool
+	var port int
 
 	// Set default duration to 300 seconds
 	flag.IntVar(&duration, "t", 300, "Duration in seconds (default is 300 seconds)")
+	flag.IntVar(&port, "p", 8080, "Port for the HTTP server (default is 8080)")
 	flag.BoolVar(&showVersion, "v", false, "Show version")
 	flag.Parse()
 
@@ -75,8 +77,8 @@ func main() {
 	})
 
 	go func() {
-		fmt.Printf("Starting server on %s:8080...\n", ip)
-		if err := http.ListenAndServe(fmt.Sprintf("%s:8080", ip), nil); err != nil {
+		fmt.Printf("Starting server on %s:%d...\n", ip, port)
+		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", ip, port), nil); err != nil {
 			fmt.Println("Error starting server:", err)
 		}
 	}()
@@ -84,7 +86,7 @@ func main() {
 	// Generate the curl command
 	fmt.Printf("File %s is now available for download for %d seconds.\n", fileName, duration)
 	fmt.Printf("Use this curl command to download the file from another PC:\n")
-	fmt.Printf("curl -O http://%s:8080/%s/download/%s\n", ip, hostname, fileName)
+	fmt.Printf("curl -O http://%s:%d/%s/download/%s\n", ip, port, hostname, fileName)
 
 	// Block main goroutine to keep the server running
 	select {}
