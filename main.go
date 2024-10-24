@@ -1,17 +1,22 @@
 package main
 
 import (
+	"archive/zip"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
 
 type SharedFile struct {
 	Filename   string
+	IsDir      bool
 	Expiration time.Time
 }
 
@@ -19,6 +24,7 @@ var (
 	sharedFiles []SharedFile
 	hostname    string
 	version     = "1.0.0"
+	mu          sync.Mutex
 )
 
 func main() {
@@ -40,37 +46,31 @@ func main() {
 	// Get positional arguments (non-flag arguments)
 	args := flag.Args()
 	if len(args) < 1 {
-		fmt.Println("Error: No filename provided. Specify a file as a positional argument.")
+		fmt.Println("Error: No filename or directory provided. Specify a file or directory as a positional argument.")
 		return
 	}
 	fileName := args[0]
 
 	currentDir, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current directory:", err)
-		return
-	}
+	checkError("Error getting current directory:", err)
 
 	ip, err := getLocalIP()
-	if err != nil {
-		fmt.Println("Error fetching IP address:", err)
-		return
-	}
+	checkError("Error fetching IP address:", err)
 
 	hostname, err = os.Hostname()
-	if err != nil {
-		fmt.Println("Error fetching hostname:", err)
-		return
-	}
+	checkError("Error fetching hostname:", err)
 
-	// Add the shared file and expiration to the list
+	isDir := isDirectory(fileName)
+
+	mu.Lock()
 	sharedFiles = append(sharedFiles, SharedFile{
 		Filename:   fileName,
+		IsDir:      isDir,
 		Expiration: time.Now().Add(time.Duration(duration) * time.Second),
 	})
+	mu.Unlock()
 
-	// Start the HTTP server
-	http.HandleFunc("/"+hostname+"/download/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
 		fileDownloadHandler(w, r, currentDir)
 	})
 
@@ -81,43 +81,45 @@ func main() {
 		}
 	}()
 
-	// Generate the curl command
-	fmt.Printf("File %s is now available for download for %d seconds.\n", fileName, duration)
-	fmt.Printf("Use this curl command to download the file from another PC:\n")
-	fmt.Printf("curl -O http://%s:8080/%s/download/%s\n", ip, hostname, fileName)
+	fmt.Printf("Item %s is now available for download for %d seconds.\n", fileName, duration)
+	fmt.Printf("Use this curl command to download the item from another PC:\n")
+	fmt.Printf("curl -O http://%s:8080/download/%s\n", ip, fileName)
 
-	// Block main goroutine to keep the server running
 	select {}
 }
 
 func fileDownloadHandler(w http.ResponseWriter, r *http.Request, currentDir string) {
-	filename := r.URL.Path[len("/"+hostname+"/download/"):]
+	filename := r.URL.Path[len("/download/"):]
 
-	// Check if the requested file is in the list of shared files
+	mu.Lock()
 	index := findSharedFileIndex(filename)
+	mu.Unlock()
+
 	if index == -1 {
 		http.Error(w, "औलो दिदा हात निल्नु हुँदैन !", http.StatusForbidden)
 		return
 	}
 
-	// Check if the file has expired before serving
+	mu.Lock()
 	if time.Now().After(sharedFiles[index].Expiration) {
 		removeSharedFile(filename)
-		http.Error(w, "लिन्क को समय सक्यो , समय थप गर्न toss सँग -t 120  गर्नुहोस अनि २ मिनेट काम गर्छ !", http.StatusGone)
+		mu.Unlock()
+		http.Error(w, "लिन्क को समय सक्यो , समय थप गर्न toss सँग -t 120 गर्नुहोस अनि २ मिनेट काम गर्छ !", http.StatusGone)
 		return
 	}
+	mu.Unlock()
 
-	// Prevent directory traversal
 	filepath := filepath.Join(currentDir, filename)
-
-	// Check if the file exists
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
 		http.Error(w, "फाईल फेला परेन !", http.StatusNotFound)
 		return
 	}
 
-	// Serve the file
-	http.ServeFile(w, r, filepath)
+	if sharedFiles[index].IsDir {
+		serveDirectoryAsZip(w, r, filepath)
+	} else {
+		http.ServeFile(w, r, filepath)
+	}
 }
 
 func findSharedFileIndex(filename string) int {
@@ -132,7 +134,7 @@ func findSharedFileIndex(filename string) int {
 func removeSharedFile(filename string) {
 	for i, sharedFile := range sharedFiles {
 		if sharedFile.Filename == filename {
-			sharedFiles = append(sharedFiles[:i], sharedFiles[i+1:]...) // Remove the file
+			sharedFiles = append(sharedFiles[:i], sharedFiles[i+1:]...)
 			break
 		}
 	}
@@ -161,4 +163,53 @@ func getLocalIP() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no valid IP address found")
+}
+
+func checkError(message string, err error) {
+	if err != nil {
+		fmt.Println(message, err)
+		os.Exit(1)
+	}
+}
+
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+func serveDirectoryAsZip(w http.ResponseWriter, r *http.Request, dirPath string) {
+	zipWriter := zip.NewWriter(w)
+	defer zipWriter.Close()
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.zip\"", filepath.Base(dirPath)))
+
+	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath := strings.TrimPrefix(path, dirPath)
+		if info.IsDir() {
+			_, err := zipWriter.Create(relPath + "/")
+			return err
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		writer, err := zipWriter.Create(relPath)
+		if err != nil {
+			return err
+		}
+
+		_, err = io.Copy(writer, file)
+		return err
+	})
 }
