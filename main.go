@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/skip2/go-qrcode"
 )
 
 type SharedFile struct {
@@ -81,10 +84,18 @@ func main() {
 		}
 	}()
 
-	// Generate the curl command
+	// Generate the curl command and the download link
+	downloadURL := fmt.Sprintf("http://%s:8080/%s/download/%s", ip, hostname, fileName)
 	fmt.Printf("File %s is now available for download for %d seconds.\n", fileName, duration)
 	fmt.Printf("Use this curl command to download the file from another PC:\n")
-	fmt.Printf("curl -O http://%s:8080/%s/download/%s\n", ip, hostname, fileName)
+	fmt.Printf("curl -O %s\n", downloadURL)
+
+	// Generate and display QR code for the download URL
+	fmt.Println("Generating QR code for the download link...")
+	err = generateQRCode(downloadURL)
+	if err != nil {
+		fmt.Println("Error generating QR code:", err)
+	}
 
 	// Block main goroutine to keep the server running
 	select {}
@@ -96,14 +107,14 @@ func fileDownloadHandler(w http.ResponseWriter, r *http.Request, currentDir stri
 	// Check if the requested file is in the list of shared files
 	index := findSharedFileIndex(filename)
 	if index == -1 {
-		http.Error(w, "औलो दिदा हात निल्नु हुँदैन !", http.StatusForbidden)
+		http.Error(w, "Access denied!", http.StatusForbidden)
 		return
 	}
 
 	// Check if the file has expired before serving
 	if time.Now().After(sharedFiles[index].Expiration) {
 		removeSharedFile(filename)
-		http.Error(w, "लिन्क को समय सक्यो , समय थप गर्न toss सँग -t 120  गर्नुहोस अनि २ मिनेट काम गर्छ !", http.StatusGone)
+		http.Error(w, "Link expired, extend time with toss -t 120.", http.StatusGone)
 		return
 	}
 
@@ -112,7 +123,7 @@ func fileDownloadHandler(w http.ResponseWriter, r *http.Request, currentDir stri
 
 	// Check if the file exists
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
-		http.Error(w, "फाईल फेला परेन !", http.StatusNotFound)
+		http.Error(w, "File not found!", http.StatusNotFound)
 		return
 	}
 
@@ -135,6 +146,32 @@ func removeSharedFile(filename string) {
 			sharedFiles = append(sharedFiles[:i], sharedFiles[i+1:]...) // Remove the file
 			break
 		}
+	}
+}
+
+// Generate the QR code and display it in the terminal
+func generateQRCode(data string) error {
+	// Create a new QR code with low error correction for a smaller size
+	qr, err := qrcode.New(data, qrcode.Low)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(err)
+	// Display the QR code in the terminal in ASCII
+	printSmallQRCode(qr)
+
+	return nil
+}
+
+// Function to print a smaller ASCII representation of the QR code
+func printSmallQRCode(qr *qrcode.QRCode) {
+	// Convert the QR code to string format
+	qrString := qr.ToString(false) // false for black and white blocks
+
+	// Split the string into lines and print
+	for _, line := range strings.Split(qrString, "\n") {
+		fmt.Println(line)
 	}
 }
 
