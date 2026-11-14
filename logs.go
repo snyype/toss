@@ -17,7 +17,7 @@ const logFileName = "toss.log"
 // logEntry is one line (JSON) in the log file.
 type logEntry struct {
 	Time     time.Time `json:"time"`
-	Event    string    `json:"event"` // share | download | end
+	Event    string    `json:"event"` // share | download | pull | end
 	File     string    `json:"file"`
 	Path     string    `json:"path,omitempty"`
 	Client   string    `json:"client,omitempty"`
@@ -38,19 +38,8 @@ type logger struct {
 // toss executable. If that folder cannot be written (e.g. toss was installed
 // into a read-only location), it falls back to the user config dir.
 func logDir() (string, error) {
-	var candidates []string
-	if exe, err := os.Executable(); err == nil {
-		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-			exe = resolved
-		}
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "logs"))
-	}
-	if cfg, err := os.UserConfigDir(); err == nil {
-		candidates = append(candidates, filepath.Join(cfg, "toss", "logs"))
-	}
-
 	var lastErr error
-	for _, dir := range candidates {
+	for _, dir := range appDirCandidates("logs") {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			lastErr = err
 			continue
@@ -159,6 +148,17 @@ func runLogs(args []string) int {
 			details = e.Status
 			if e.Elapsed != "" {
 				details += " in " + e.Elapsed
+			}
+		case "pull":
+			size = humanBytes(e.Bytes)
+			details = e.Status
+			if e.Elapsed != "" {
+				details += " in " + e.Elapsed
+			}
+			if e.Path != "" {
+				details += "  " + e.Path
+			} else if e.URL != "" {
+				details += "  " + e.URL
 			}
 		case "end":
 			details = fmt.Sprintf("%s, %d download(s)", e.Status, e.Count)
