@@ -37,17 +37,30 @@ type ghAsset struct {
 	URL  string `json:"browser_download_url"`
 }
 
-// Releases are tagged per platform, e.g. win-2.0.0, linux-1.0.0, darwin-1.0.0.
-func platformTagPrefix() (prefix, asset string, ok bool) {
+// Releases are tagged per platform, e.g. win-2.1.0, linux-2.1.0, darwin-2.1.0.
+// Each release has a plain "toss"/"toss.exe" asset (amd64) and, from 2.1.0,
+// "toss-arm64"/"toss-arm64.exe" for ARM machines.
+func platformTagPrefix() (prefix string, assets []string, ok bool) {
+	ext := ""
 	switch runtime.GOOS {
 	case "windows":
-		return "win-", "toss.exe", true
+		prefix, ext = "win-", ".exe"
 	case "linux":
-		return "linux-", "toss", true
+		prefix = "linux-"
 	case "darwin":
-		return "darwin-", "toss", true
+		prefix = "darwin-"
+	default:
+		return "", nil, false
 	}
-	return "", "", false
+	if runtime.GOARCH == "arm64" {
+		assets = append(assets, "toss-arm64"+ext)
+		// Windows and macOS on ARM can still run the amd64 build under emulation.
+		if runtime.GOOS != "linux" {
+			assets = append(assets, "toss"+ext)
+		}
+		return prefix, assets, true
+	}
+	return prefix, []string{"toss" + ext}, true
 }
 
 // runUpdate implements `toss update`.
@@ -63,7 +76,7 @@ func runUpdate(args []string) int {
 		return 2
 	}
 
-	prefix, assetName, ok := platformTagPrefix()
+	prefix, assetNames, ok := platformTagPrefix()
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Error: automatic updates are not available for %s.\n", runtime.GOOS)
 		return 1
@@ -84,9 +97,14 @@ func runUpdate(args []string) int {
 	}
 
 	var asset *ghAsset
-	for i := range rel.Assets {
-		if rel.Assets[i].Name == assetName {
-			asset = &rel.Assets[i]
+	for _, want := range assetNames {
+		for i := range rel.Assets {
+			if rel.Assets[i].Name == want {
+				asset = &rel.Assets[i]
+				break
+			}
+		}
+		if asset != nil {
 			break
 		}
 	}
@@ -95,7 +113,7 @@ func runUpdate(args []string) int {
 	printUpdateBox(latestStr, rel, asset)
 
 	if asset == nil {
-		fmt.Fprintf(os.Stderr, "%s This release has no %s download for your system. Get it from:\n  %s\n", yellow("!"), assetName, rel.HTMLURL)
+		fmt.Fprintf(os.Stderr, "%s This release has no %s download for your system. Get it from:\n  %s\n", yellow("!"), assetNames[0], rel.HTMLURL)
 		return 1
 	}
 	if *checkOnly {

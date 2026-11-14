@@ -1,0 +1,139 @@
+name: Release & Pages
+
+# On every push/merge to main:
+#   - checks the code builds on every platform
+#   - deploys docs/ to GitHub Pages
+#   - if the version in main.go has no release yet, builds the binaries and
+#     publishes win-<v>, linux-<v> and darwin-<v> releases (the tag scheme
+#     `toss update` and install.sh look for)
+# Merging without bumping `version` in main.go only redeploys the site.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release-and-pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Run gofmt on:"; echo "$unformatted"; exit 1; fi
+      - name: vet (all platforms)
+        run: |
+          for os in linux darwin windows; do
+            echo "go vet ($os)"; GOOS=$os go vet ./...
+          done
+
+  pages:
+    needs: check
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(sed -n 's/^var version = "\([0-9][0-9.]*\)"$/\1/p' main.go)
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Could not read a x.y.z version from main.go (got '$VERSION')"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/win-$VERSION" >/dev/null; then
+            echo "Release $VERSION already exists - bump 'version' in main.go to publish a new one."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.version.outputs.exists == 'false'
+        with:
+          go-version-file: go.mod
+
+      - name: Windows icon and version info
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          go install github.com/tc-hib/go-winres@v0.3.3
+          V=${{ steps.version.outputs.version }}
+          "$(go env GOPATH)/bin/go-winres" simply --icon winres/toss.ico --manifest cli \
+            --arch amd64,386,arm64 --product-version "$V.0" --file-version "$V.0" \
+            --product-name Toss --file-description "Toss - share files on your local network" \
+            --original-filename toss.exe --copyright "MIT License"
+
+      - name: Build
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          V=${{ steps.version.outputs.version }}
+          build() { # goos goarch output
+            echo "building $3"
+            CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w -X main.version=$V" -o "$3" .
+          }
+          build windows amd64 dist/win/toss.exe
+          build windows arm64 dist/win/toss-arm64.exe
+          build linux   amd64 dist/linux/toss
+          build linux   arm64 dist/linux/toss-arm64
+          build darwin  amd64 dist/darwin/toss
+          build darwin  arm64 dist/darwin/toss-arm64
+          ls -l dist/*
+
+      - name: Release notes
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          PREV=$(git tag -l 'win-*' --sort=-v:refname | head -n1)
+          {
+            echo "## What's new"
+            if [ -n "$PREV" ]; then
+              git log "$PREV..HEAD" --no-merges --pretty='- %s'
+            else
+              git log --no-merges --pretty='- %s'
+            fi
+            echo
+            echo "Update with \`toss update\`, or install fresh:"
+            echo '```'
+            echo 'curl -o- https://raw.githubusercontent.com/snyype/toss/main/install.sh | bash'
+            echo '```'
+          } > notes.md
+          cat notes.md
+
+      - name: Publish releases
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          V=${{ steps.version.outputs.version }}
+          gh release create "linux-$V"  dist/linux/*  --target "$GITHUB_SHA" --title "Linux v$V"   --notes-file notes.md --latest=false
+          gh release create "darwin-$V" dist/darwin/* --target "$GITHUB_SHA" --title "macOS v$V"   --notes-file notes.md --latest=false
+          gh release create "win-$V"    dist/win/*    --target "$GITHUB_SHA" --title "Windows v$V" --notes-file notes.md --latest

@@ -62,14 +62,21 @@ toss update -y       # install without asking
 ```
 The new version is downloaded, checked to make sure it runs, and only then swapped in, so a failed download leaves your current install untouched.
 
-# Building
+# Releasing
+Releases and the website are automated by `.github/workflows/release.yml`. On every merge to `main`:
+
+1. The code is checked (gofmt, `go vet` for Linux, macOS and Windows).
+2. `docs/` is deployed to GitHub Pages.
+3. If the `version` in `main.go` has no release yet, binaries are built for Windows, Linux and macOS (amd64 + arm64), the Windows icon/version info is regenerated, and `win-<version>`, `linux-<version>` and `darwin-<version>` releases are published with notes from the commit messages.
+
+So to ship a new version: bump `var version = "x.y.z"` in `main.go` and merge to `main`. `toss update` and `install.sh` pick it up automatically.
+
+One-time setup: in the repo go to **Settings → Pages** and set **Source** to **GitHub Actions**.
+
+# Building locally
 ```
 go build -o toss .            # Linux / macOS
 go build -o toss.exe .        # Windows (icon and version info come from the rsrc_windows_*.syso files)
-```
-When the version or icon changes, regenerate the Windows resources (needs [go-winres](https://github.com/tc-hib/go-winres)):
-```
-go-winres simply --icon winres/toss.ico --manifest cli --arch amd64,386,arm64   --product-version 2.1.0.0 --file-version 2.1.0.0 --product-name Toss   --file-description "Toss - share files on your local network" --original-filename toss.exe
 ```
 
 # License
