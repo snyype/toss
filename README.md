@@ -28,14 +28,48 @@ Run the command with the desired file and an optional duration:
 </div>
 
 ```
-toss -t 300 myfile.txt
+toss -t 300 myfile.txt      # share for 300 seconds (5 minutes)
+toss myfile.txt -t 60       # flags can also go after the file
+toss -p 9000 myfile.txt     # use a different port (a free one is picked if busy)
 ```
-This command shares myfile.txt for 300 seconds (5 minutes).
 
-# Example Command
-To download the shared file from another device, use:
+Toss prints a download link. On the other device:
 ```
-curl -O http://<your-ip>:8080/<hostname>/download/myfile.txt
+curl -o myfile.txt http://<your-ip>:8080/<hostname>/download/myfile.txt
+curl -C - -o myfile.txt http://<your-ip>:8080/<hostname>/download/myfile.txt   # resume an interrupted download
+```
+Or just open the link in a browser. Files are streamed from disk, so large files work without using extra memory, and downloads already in progress are allowed to finish when the link expires.
+
+If the printed address is not reachable (VPN, multiple network adapters), Toss also lists your other addresses to try. On Windows, allow `toss.exe` through the firewall when prompted.
+
+While sharing, Toss shows a live view refreshed every 3 seconds: each client's IP and machine name, the app downloading (curl, Chrome, ...), progress, current speed, elapsed time and ETA, plus total speed and open connections. Use `-q` to hide it. Large files (several GB) are fine.
+
+# Logs
+Every share and download is recorded in a `logs` folder inside the Toss install directory (e.g. `C:\toss\logs` or `~/.local/bin/logs`).
+
+```
+toss logs            # show the 20 most recent entries
+toss logs -n 50      # show more
+toss logs -path      # print the log file location
+toss logs -clear     # delete the history
+```
+
+# Updating
+```
+toss update          # check GitHub for a newer release and ask before installing
+toss update -check   # only check, don't install
+toss update -y       # install without asking
+```
+The new version is downloaded, checked to make sure it runs, and only then swapped in, so a failed download leaves your current install untouched.
+
+# Building
+```
+go build -o toss .            # Linux / macOS
+go build -o toss.exe .        # Windows (icon and version info come from the rsrc_windows_*.syso files)
+```
+When the version or icon changes, regenerate the Windows resources (needs [go-winres](https://github.com/tc-hib/go-winres)):
+```
+go-winres simply --icon winres/toss.ico --manifest cli --arch amd64,386,arm64   --product-version 2.1.0.0 --file-version 2.1.0.0 --product-name Toss   --file-description "Toss - share files on your local network" --original-filename toss.exe
 ```
 
 # License

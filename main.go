@@ -1,164 +1,465 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
-type SharedFile struct {
-	Filename   string
-	Expiration time.Time
-}
+var version = "2.1.0"
 
-var (
-	sharedFiles []SharedFile
-	hostname    string
-	version     = "1.0.0"
-)
+// share describes the single file a toss process is serving.
+type share struct {
+	path       string // absolute path on disk
+	name       string // name exposed in the URL
+	size       int64
+	expiresAt  time.Time
+	urlPath    string // decoded path the handler answers on
+	active     sync.WaitGroup
+	downloads  atomic.Int64
+	inProgress atomic.Int64
+	track      *tracker
+	out        *console
+}
 
 func main() {
-	// Define command-line flags
-	var duration int
-	var showVersion bool
+	cleanupOldBinary()
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "logs":
+			os.Exit(runLogs(os.Args[2:]))
+		case "update":
+			os.Exit(runUpdate(os.Args[2:]))
+		}
+	}
+	os.Exit(runShare())
+}
 
-	// Set default duration to 300 seconds
-	flag.IntVar(&duration, "t", 300, "Duration in seconds (default is 300 seconds)")
-	flag.BoolVar(&showVersion, "v", false, "Show version")
-	flag.Parse()
+func usage() {
+	out := flag.CommandLine.Output()
+	fmt.Fprintf(out, "toss %s - share a file over your local network\n\n", version)
+	fmt.Fprintln(out, "Usage:")
+	fmt.Fprintln(out, "  toss [-t seconds] [-p port] [-q] <file>  share a file")
+	fmt.Fprintln(out, "  toss logs [-n count] [-path] [-clear] show recent shares and downloads")
+	fmt.Fprintln(out, "  toss update [-check] [-y]            update toss to the latest release")
+	fmt.Fprintln(out, "  toss -v                              show version")
+	fmt.Fprintln(out, "\nOptions:")
+	flag.PrintDefaults()
+}
 
-	// Show version and exit if -v flag is provided
+func runShare() int {
+	var (
+		duration    int
+		port        int
+		showVersion bool
+		quiet       bool
+	)
+	flag.IntVar(&duration, "t", 300, "how long the link stays valid, in seconds")
+	flag.IntVar(&port, "p", 8080, "port to listen on (a free port is picked if it is busy)")
+	flag.BoolVar(&showVersion, "v", false, "show version")
+	flag.BoolVar(&quiet, "q", false, "hide the live transfer view (refreshed every 3s)")
+	flag.Usage = usage
+
+	// Allow flags after the filename too, e.g. `toss file.txt -t 60`.
+	args, err := parseInterspersed(flag.CommandLine, os.Args[1:])
+	if err != nil {
+		return 2
+	}
+
 	if showVersion {
 		fmt.Printf("toss version %s\n", version)
-		return
+		return 0
+	}
+	if len(args) != 1 {
+		if len(args) == 0 {
+			fmt.Fprintln(os.Stderr, "Error: no file given. Usage: toss [-t seconds] <file>")
+		} else {
+			fmt.Fprintln(os.Stderr, "Error: toss shares one file at a time. Zip multiple files first.")
+		}
+		return 2
+	}
+	if duration <= 0 {
+		fmt.Fprintln(os.Stderr, "Error: -t must be a positive number of seconds.")
+		return 2
+	}
+	if port < 0 || port > 65535 {
+		fmt.Fprintln(os.Stderr, "Error: -p must be a port between 0 and 65535.")
+		return 2
 	}
 
-	// Get positional arguments (non-flag arguments)
-	args := flag.Args()
-	if len(args) < 1 {
-		fmt.Println("Error: No filename provided. Specify a file as a positional argument.")
-		return
-	}
-	fileName := args[0]
-
-	currentDir, err := os.Getwd()
+	absPath, err := filepath.Abs(args[0])
 	if err != nil {
-		fmt.Println("Error getting current directory:", err)
-		return
+		fmt.Fprintln(os.Stderr, "Error: cannot resolve file path:", err)
+		return 1
 	}
-
-	ip, err := getLocalIP()
+	info, err := os.Stat(absPath)
 	if err != nil {
-		fmt.Println("Error fetching IP address:", err)
-		return
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Error: file not found: %s\n", args[0])
+		} else {
+			fmt.Fprintln(os.Stderr, "Error: cannot access file:", err)
+		}
+		return 1
+	}
+	if info.IsDir() {
+		fmt.Fprintf(os.Stderr, "Error: %s is a folder. toss shares single files; zip the folder first.\n", args[0])
+		return 1
+	}
+	// Make sure we can actually read it before handing out a link.
+	if f, err := os.Open(absPath); err != nil {
+		fmt.Fprintln(os.Stderr, "Error: cannot read file:", err)
+		return 1
+	} else {
+		f.Close()
 	}
 
-	hostname, err = os.Hostname()
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		hostname = "toss"
+	}
+
+	s := &share{
+		path:      absPath,
+		name:      filepath.Base(absPath),
+		size:      info.Size(),
+		expiresAt: time.Now().Add(time.Duration(duration) * time.Second),
+		track:     newTracker(),
+		out:       newConsole(),
+	}
+	s.urlPath = "/" + hostname + "/download/" + s.name
+
+	// Listen on all interfaces so the link works no matter which adapter
+	// the other machine reaches us through.
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		fmt.Println("Error fetching hostname:", err)
-		return
+		fmt.Printf("Port %d is busy, picking a free port instead...\n", port)
+		ln, err = net.Listen("tcp", ":0")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error: cannot start server:", err)
+			return 1
+		}
+	}
+	actualPort := ln.Addr().(*net.TCPAddr).Port
+
+	primary, others := localIPs()
+	escapedPath := "/" + url.PathEscape(hostname) + "/download/" + url.PathEscape(s.name)
+	link := fmt.Sprintf("http://%s:%d%s", primary, actualPort, escapedPath)
+
+	logger := openLogger()
+	logger.write(logEntry{Event: "share", File: s.name, Path: s.path, Bytes: s.size, URL: link, Duration: duration})
+
+	srv := &http.Server{
+		Handler:           s.handler(logger),
+		ReadHeaderTimeout: 10 * time.Second,
+		ConnState:         s.track.connState,
+		// No WriteTimeout: large files must be able to stream for as long as they need.
 	}
 
-	// Add the shared file and expiration to the list
-	sharedFiles = append(sharedFiles, SharedFile{
-		Filename:   fileName,
-		Expiration: time.Now().Add(time.Duration(duration) * time.Second),
-	})
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
 
-	// Start the HTTP server
-	http.HandleFunc("/"+hostname+"/download/", func(w http.ResponseWriter, r *http.Request) {
-		fileDownloadHandler(w, r, currentDir)
-	})
+	fmt.Printf("Sharing %s (%s) for %s.\n", s.name, humanBytes(s.size), time.Duration(duration)*time.Second)
+	fmt.Println("Download it from another device on the same network with:")
+	fmt.Printf("  curl -o %q %s\n", s.name, link)
+	fmt.Printf("  or open in a browser: %s\n", link)
+	if len(others) > 0 {
+		fmt.Println("If that address is unreachable, try one of:")
+		for _, ip := range others {
+			fmt.Printf("  http://%s:%d%s\n", ip, actualPort, escapedPath)
+		}
+	}
+	fmt.Println("Press Ctrl+C to stop sharing early.")
 
+	dashCtx, stopDash := context.WithCancel(context.Background())
+	dashDone := make(chan struct{})
 	go func() {
-		fmt.Printf("Starting server on %s:8080...\n", ip)
-		if err := http.ListenAndServe(fmt.Sprintf("%s:8080", ip), nil); err != nil {
-			fmt.Println("Error starting server:", err)
+		defer close(dashDone)
+		if !quiet {
+			runDashboard(dashCtx, s, s.track, s.out)
 		}
 	}()
+	defer func() { stopDash(); <-dashDone }()
 
-	// Generate the curl command
-	fmt.Printf("File %s is now available for download for %d seconds.\n", fileName, duration)
-	fmt.Printf("Use this curl command to download the file from another PC:\n")
-	fmt.Printf("curl -O http://%s:8080/%s/download/%s\n", ip, hostname, fileName)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	timer := time.NewTimer(time.Until(s.expiresAt))
+	defer timer.Stop()
 
-	// Block main goroutine to keep the server running
-	select {}
-}
-
-func fileDownloadHandler(w http.ResponseWriter, r *http.Request, currentDir string) {
-	filename := r.URL.Path[len("/"+hostname+"/download/"):]
-
-	// Check if the requested file is in the list of shared files
-	index := findSharedFileIndex(filename)
-	if index == -1 {
-		http.Error(w, "औलो दिदा हात निल्नु हुँदैन !", http.StatusForbidden)
-		return
+	reason := "expired"
+	select {
+	case <-timer.C:
+		s.out.event("Link expired. No new downloads will be accepted.\n")
+	case <-sig:
+		reason = "stopped"
+		s.out.event("Stopping...\n")
+	case err := <-serveErr:
+		stopDash()
+		<-dashDone
+		s.out.finish()
+		fmt.Fprintln(os.Stderr, "Error: server stopped:", err)
+		logger.write(logEntry{Event: "end", File: s.name, Status: "server error: " + err.Error()})
+		return 1
 	}
 
-	// Check if the file has expired before serving
-	if time.Now().After(sharedFiles[index].Expiration) {
-		removeSharedFile(filename)
-		http.Error(w, "लिन्क को समय सक्यो , समय थप गर्न toss सँग -t 120  गर्नुहोस अनि २ मिनेट काम गर्छ !", http.StatusGone)
-		return
+	// Let downloads that are already streaming finish; Ctrl+C again aborts them.
+	if n := s.inProgress.Load(); n > 0 {
+		s.out.event("Waiting for %d download(s) in progress to finish (Ctrl+C to abort)...\n", n)
 	}
-
-	// Prevent directory traversal
-	filepath := filepath.Join(currentDir, filename)
-
-	// Check if the file exists
-	if _, err := os.Stat(filepath); os.IsNotExist(err) {
-		http.Error(w, "फाईल फेला परेन !", http.StatusNotFound)
-		return
-	}
-
-	// Serve the file
-	http.ServeFile(w, r, filepath)
-}
-
-func findSharedFileIndex(filename string) int {
-	for i, sharedFile := range sharedFiles {
-		if sharedFile.Filename == filename {
-			return i
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-sig:
+			cancel()
+		case <-ctx.Done():
 		}
+	}()
+	if err := srv.Shutdown(ctx); err != nil {
+		srv.Close()
 	}
-	return -1
+	cancel()
+	s.active.Wait()
+	stopDash()
+	<-dashDone
+	s.out.finish()
+
+	logger.write(logEntry{Event: "end", File: s.name, Status: reason, Count: s.downloads.Load()})
+	fmt.Printf("Done. %d download(s) served, %s sent in total.\n", s.downloads.Load(), humanBytes(s.track.served.Load()))
+	return 0
 }
 
-func removeSharedFile(filename string) {
-	for i, sharedFile := range sharedFiles {
-		if sharedFile.Filename == filename {
-			sharedFiles = append(sharedFiles[:i], sharedFiles[i+1:]...) // Remove the file
-			break
+func (s *share) handler(logger *logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != s.urlPath {
+			http.Error(w, "Not found: this link does not match any shared file.", http.StatusNotFound)
+			return
 		}
-	}
-}
-
-func getLocalIP() (string, error) {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return "", err
-	}
-
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method not allowed.", http.StatusMethodNotAllowed)
+			return
+		}
+		if time.Now().After(s.expiresAt) {
+			http.Error(w, "This link has expired. Ask the sender to run toss again (use -t to share for longer, e.g. toss -t 600 <file>).", http.StatusGone)
+			return
 		}
 
-		addrs, err := iface.Addrs()
+		f, err := os.Open(s.path)
 		if err != nil {
-			continue
+			http.Error(w, "The shared file is no longer available on the sender's machine.", http.StatusNotFound)
+			return
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil || info.IsDir() {
+			http.Error(w, "The shared file is no longer available on the sender's machine.", http.StatusNotFound)
+			return
 		}
 
-		for _, addr := range addrs {
-			if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.To4() != nil {
-				return ipNet.IP.String(), nil
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": s.name}))
+		w.Header().Set("Cache-Control", "no-store")
+
+		if r.Method == http.MethodHead {
+			http.ServeContent(w, r, s.name, info.ModTime(), f)
+			return
+		}
+
+		s.active.Add(1)
+		s.inProgress.Add(1)
+		defer s.active.Done()
+		defer s.inProgress.Add(-1)
+
+		tr := s.track.begin(r)
+		defer s.track.end(tr)
+		client := tr.client
+		start := tr.start
+		cw := &countingWriter{ResponseWriter: w, tr: tr, served: &s.track.served}
+		s.out.event("[%s] %s started downloading with %s%s\n", start.Format("15:04:05"), client, tr.agent, rangeNote(r))
+
+		// ServeContent streams the file from disk in chunks (never loads it into
+		// memory) and supports Range requests, so interrupted downloads can resume
+		// with `curl -C -`.
+		http.ServeContent(cw, r, s.name, info.ModTime(), f)
+
+		elapsed := time.Since(start)
+		expected, _ := strconv.ParseInt(cw.Header().Get("Content-Length"), 10, 64)
+		status := "completed"
+		switch {
+		case cw.status >= 400:
+			status = fmt.Sprintf("failed (HTTP %d)", cw.status)
+		case cw.status == http.StatusNotModified:
+			status = "not modified"
+		case cw.sent() < expected:
+			status = "interrupted"
+		case cw.status == http.StatusPartialContent:
+			status = "completed (range)"
+		}
+		if strings.HasPrefix(status, "completed") {
+			s.downloads.Add(1)
+		}
+
+		s.out.event("[%s] %s %s: %s in %s (avg %s/s)\n", time.Now().Format("15:04:05"), s.track.clientLabel(client), status,
+			humanBytes(cw.sent()), elapsed.Round(time.Millisecond), humanBytes(rate(cw.sent(), elapsed)))
+		logger.write(logEntry{Event: "download", File: s.name, Client: client, Bytes: cw.sent(),
+			Status: status, Elapsed: elapsed.Round(time.Millisecond).String()})
+	})
+}
+
+type countingWriter struct {
+	http.ResponseWriter
+	status int
+	tr     *transfer
+	served *atomic.Int64
+}
+
+func (c *countingWriter) sent() int64 { return c.tr.sent.Load() }
+
+func (c *countingWriter) WriteHeader(code int) {
+	if c.status == 0 {
+		c.status = code
+		if n, err := strconv.ParseInt(c.Header().Get("Content-Length"), 10, 64); err == nil {
+			c.tr.total.Store(n)
+		}
+	}
+	c.ResponseWriter.WriteHeader(code)
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	if c.status == 0 {
+		c.WriteHeader(http.StatusOK)
+	}
+	n, err := c.ResponseWriter.Write(p)
+	c.tr.sent.Add(int64(n))
+	c.served.Add(int64(n))
+	return n, err
+}
+
+func (c *countingWriter) Unwrap() http.ResponseWriter { return c.ResponseWriter }
+
+func rangeNote(r *http.Request) string {
+	if rg := r.Header.Get("Range"); rg != "" {
+		return " (partial: " + rg + ")"
+	}
+	return ""
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func rate(n int64, d time.Duration) int64 {
+	if d <= 0 {
+		return n
+	}
+	return int64(float64(n) / d.Seconds())
+}
+
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// parseInterspersed parses flags that may appear before or after positional args.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return positional, nil
+		}
+		if rest[0] == "--" {
+			return append(positional, rest[1:]...), nil
+		}
+		positional = append(positional, rest[0])
+		args = rest[1:]
+	}
+}
+
+// localIPs returns the address other machines most likely reach us on, plus
+// any other usable IPv4 addresses (VPN, Wi-Fi + Ethernet, virtual adapters...).
+func localIPs() (string, []string) {
+	var primary string
+	// No packets are sent: dialing UDP just asks the OS which local address it
+	// would route outbound traffic through.
+	if conn, err := net.Dial("udp4", "8.8.8.8:80"); err == nil {
+		primary = conn.LocalAddr().(*net.UDPAddr).IP.String()
+		conn.Close()
+	}
+
+	var all []string
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, a := range addrs {
+				ipNet, ok := a.(*net.IPNet)
+				if !ok {
+					continue
+				}
+				ip4 := ipNet.IP.To4()
+				if ip4 == nil || ip4.IsLinkLocalUnicast() {
+					continue
+				}
+				all = append(all, ip4.String())
 			}
 		}
 	}
-	return "", fmt.Errorf("no valid IP address found")
+
+	if primary == "" {
+		// Offline LAN: prefer a private address.
+		for _, ip := range all {
+			if net.ParseIP(ip).IsPrivate() {
+				primary = ip
+				break
+			}
+		}
+		if primary == "" && len(all) > 0 {
+			primary = all[0]
+		}
+		if primary == "" {
+			primary = "127.0.0.1"
+		}
+	}
+
+	var others []string
+	for _, ip := range all {
+		if ip != primary {
+			others = append(others, ip)
+		}
+	}
+	return primary, others
 }
