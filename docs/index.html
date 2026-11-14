@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toss — share files on your LAN</title>
+<meta name="description" content="Toss is a tiny command-line tool to share a file over your local network with a time-limited link.">
+<meta property="og:title" content="Toss">
+<meta property="og:description" content="Share a file over your local network with one command and a time-limited link.">
+<meta property="og:image" content="https://raw.githubusercontent.com/snyype/toss/main/Toss.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #1b1b1f; --muted: #5d5d66;
+    --border: #e3e3e0; --accent: #3b5bdb; --code-bg: #16161a; --code-text: #e8e8ec;
+    --prompt: #8ce99a; --comment: #868e96;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111114; --surface: #1a1a1f; --text: #ececf1; --muted: #a0a0ab;
+      --border: #2b2b33; --accent: #7b96ff; --code-bg: #0b0b0d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 16px; }
+  header { padding: 64px 0 40px; text-align: center; }
+  header img { width: min(320px, 70%); height: auto; }
+  h1 { font-size: 2.4rem; margin: 16px 0 8px; letter-spacing: -0.02em; }
+  .tagline { color: var(--muted); font-size: 1.15rem; margin: 0 auto 28px; max-width: 560px; }
+  .btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 10px 20px; border-radius: 8px; text-decoration: none;
+    font-weight: 600; border: 1px solid var(--border); color: var(--text); background: var(--surface);
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  h2 { font-size: 1.4rem; margin: 48px 0 12px; }
+  p { margin: 0 0 12px; }
+  pre {
+    background: var(--code-bg); color: var(--code-text); padding: 16px 18px; border-radius: 10px;
+    overflow-x: auto; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0 0 16px;
+    position: relative;
+  }
+  pre .p { color: var(--prompt); user-select: none; }
+  pre .c { color: var(--comment); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
+  p code, li code { background: var(--surface); border: 1px solid var(--border); padding: 1px 6px; border-radius: 5px; }
+  .copy {
+    position: absolute; top: 8px; right: 8px; font-size: 12px; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid #3a3a44; background: #24242b; color: #d0d0d8; cursor: pointer;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
+  .card p { color: var(--muted); margin: 0; font-size: .95rem; }
+  .shot { width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); }
+  footer { color: var(--muted); text-align: center; padding: 56px 0 40px; font-size: .9rem; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="https://raw.githubusercontent.com/snyype/toss/main/Toss.png" alt="Toss logo">
+    <h1>Toss</h1>
+    <p class="tagline">Share a file with anyone on your local network in one command. The link expires on its own when time runs out.</p>
+    <div class="btns">
+      <a class="btn primary" href="#install">Install</a>
+      <a class="btn" href="https://github.com/snyype/toss">View on GitHub</a>
+    </div>
+  </header>
+
+  <h2 id="install">Install</h2>
+  <p>macOS, Linux and Windows (Git Bash):</p>
+  <pre><code><span class="p">$ </span>curl -o- https://raw.githubusercontent.com/snyype/toss/main/install.sh | bash</code></pre>
+
+  <h2>Share a file</h2>
+  <pre><code><span class="p">$ </span>toss -t 300 report.pdf
+Sharing report.pdf (2.4 MiB) for 5m0s.
+Download it from another device on the same network with:
+  curl -o "report.pdf" http://192.168.1.65:8080/my-pc/download/report.pdf
+  or open in a browser: http://192.168.1.65:8080/my-pc/download/report.pdf</code></pre>
+  <p>On the other device, open the link in a browser or use curl. To resume an interrupted download:</p>
+  <pre><code><span class="p">$ </span>curl -C - -o report.pdf http://192.168.1.65:8080/my-pc/download/report.pdf</code></pre>
+
+  <h2>See what you've sent</h2>
+  <pre><code><span class="p">$ </span>toss logs
+TIME                 EVENT     FILE         CLIENT         SIZE      DETAILS
+2026-11-14 20:23:02  share     report.pdf                  2.4 MiB   for 300s
+2026-11-14 20:23:40  download  report.pdf   192.168.1.80   2.4 MiB   completed in 310ms
+2026-11-14 20:28:02  end       report.pdf                            expired, 1 download(s)</code></pre>
+  <p>Logs live in a <code>logs</code> folder inside the Toss install directory. Use <code>toss logs -n 50</code> for more entries, <code>-path</code> to find the file, or <code>-clear</code> to wipe it.</p>
+
+  <h2>Stay up to date</h2>
+  <pre><code><span class="p">$ </span>toss update
+╭──────────────────────────────────────────────╮
+│  A new version of toss is available!         │
+│                                              │
+│  v2.1.0  →  v2.2.0                           │
+│  Download size 7.8 MiB                       │
+╰──────────────────────────────────────────────╯
+? Update to v2.2.0 now? [Y/n] y
+Downloading ██████████████████████████████ 100%
+✓ Updated toss v2.1.0 → v2.2.0</code></pre>
+  <p>Use <code>toss update -check</code> to only check, or <code>-y</code> to skip the prompt.</p>
+
+  <h2>Features</h2>
+  <div class="grid">
+    <div class="card"><h3>One command</h3><p>No accounts, no uploads. Files go straight from your machine to the other device.</p></div>
+    <div class="card"><h3>Time-limited links</h3><p>Pick how long the link lives with <code>-t</code>. Toss exits on its own when time runs out.</p></div>
+    <div class="card"><h3>Streams large files</h3><p>Files are read from disk in chunks, so big files don't fill up memory. Interrupted downloads can resume.</p></div>
+    <div class="card"><h3>Live transfer view</h3><p>See who is downloading, from which app, with progress, speed and time left, refreshed every 3 seconds.</p></div>
+    <div class="card"><h3>Activity log</h3><p><code>toss logs</code> shows what you shared, who downloaded it, and whether the download finished.</p></div>
+  </div>
+
+  <h2>Options</h2>
+  <pre><code>toss [-t seconds] [-p port] [-q] &lt;file&gt;  <span class="c"># share a file (default 300s, port 8080; -q hides the live view)</span>
+toss logs [-n count] [-path] [-clear] <span class="c"># show recent activity</span>
+toss update [-check] [-y]            <span class="c"># update to the latest release</span>
+toss -v                              <span class="c"># show version</span></code></pre>
+
+  <h2>Screenshot</h2>
+  <img class="shot" src="https://raw.githubusercontent.com/snyype/toss/main/toss-terminal.png" alt="Toss running in a terminal">
+
+  <footer>
+    MIT licensed · <a href="https://github.com/snyype/toss">github.com/snyype/toss</a>
+  </footer>
+</div>
+<script>
+  document.querySelectorAll('pre').forEach(function (pre) {
+    var b = document.createElement('button');
+    b.className = 'copy'; b.type = 'button'; b.textContent = 'Copy';
+    b.addEventListener('click', function () {
+      var text = Array.from(pre.querySelector('code').childNodes)
+        .filter(function (n) { return !(n.classList && (n.classList.contains('p') || n.classList.contains('c'))); })
+        .map(function (n) { return n.textContent; }).join('').trim();
+      navigator.clipboard.writeText(text).then(function () {
+        b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1200);
+      });
+    });
+    pre.appendChild(b);
+  });
+</script>
+</body>
+</html>
