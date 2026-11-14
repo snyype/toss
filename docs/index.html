@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Toss — share files on your LAN</title>
-<meta name="description" content="Toss is a tiny command-line tool to share a file over your local network with a time-limited link.">
+<meta name="description" content="Toss is a tiny command-line tool to share a file or folder over your local network with a time-limited link.">
 <meta property="og:title" content="Toss">
 <meta property="og:description" content="Share a file over your local network with one command and a time-limited link.">
 <meta property="og:image" content="https://raw.githubusercontent.com/snyype/toss/main/Toss.png">
@@ -46,6 +46,7 @@
   }
   pre .p { color: var(--prompt); user-select: none; }
   pre .c { color: var(--comment); }
+  pre .g { color: var(--prompt); }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
   p code, li code { background: var(--surface); border: 1px solid var(--border); padding: 1px 6px; border-radius: 5px; }
   .copy {
@@ -66,7 +67,7 @@
   <header>
     <img src="https://raw.githubusercontent.com/snyype/toss/main/Toss.png" alt="Toss logo">
     <h1>Toss</h1>
-    <p class="tagline">Share a file with anyone on your local network in one command. The link expires on its own when time runs out.</p>
+    <p class="tagline">Share a file or folder with anyone on your local network in one command. The link expires on its own when time runs out.</p>
     <div class="btns">
       <a class="btn primary" href="#install">Install</a>
       <a class="btn" href="https://github.com/snyype/toss">View on GitHub</a>
@@ -81,10 +82,26 @@
   <pre><code><span class="p">$ </span>toss -t 300 report.pdf
 Sharing report.pdf (2.4 MiB) for 5m0s.
 Download it from another device on the same network with:
+  <span class="g">toss pull http://192.168.1.65:8080/my-pc/download/report.pdf</span>
   curl -o "report.pdf" http://192.168.1.65:8080/my-pc/download/report.pdf
   or open in a browser: http://192.168.1.65:8080/my-pc/download/report.pdf</code></pre>
-  <p>On the other device, open the link in a browser or use curl. To resume an interrupted download:</p>
+  <p>On the other device, copy the green <code>toss pull</code> line, open the link in a browser, or use curl. To resume an interrupted curl download:</p>
   <pre><code><span class="p">$ </span>curl -C - -o report.pdf http://192.168.1.65:8080/my-pc/download/report.pdf</code></pre>
+
+  <h2>Share a folder</h2>
+  <pre><code><span class="p">$ </span>toss photos
+? photos is a folder (128 files, 342.5 MiB). Zip it and share as photos.zip? [Y/n] y
+Zipping... ████████████ 100% 342.5 MiB/342.5 MiB  128/128 files
+✓ Zipped 128 files into photos.zip (339.8 MiB) in 6.2s.
+Sharing photos.zip (339.8 MiB) for 5m0s.</code></pre>
+  <p>Toss asks before zipping; use <code>toss -y photos</code> to skip the question. The zip is made in a <code>temp</code> folder inside the Toss install directory and deleted when Toss exits. Your original folder is never modified.</p>
+
+  <h2>Pull a file</h2>
+  <pre><code><span class="p">$ </span>toss pull http://192.168.1.65:8080/my-pc/download/photos.zip
+  ████████████  100% 339.8 MiB/339.8 MiB 41.2 MiB/s   ETA 0s
+✓ Downloaded photos.zip (339.8 MiB in 8.3s, avg 40.9 MiB/s)
+Saved to: <span class="g">C:\toss\downloads\photos.zip</span></code></pre>
+  <p>Files land in a <code>downloads</code> folder inside the Toss install directory, and the full path is printed at the end. <code>toss stream &lt;link&gt;</code> does the same thing. If a download is interrupted, run the same command again to resume; existing files are never overwritten (you get <code>photos (1).zip</code> instead).</p>
 
   <h2>See what you've sent</h2>
   <pre><code><span class="p">$ </span>toss logs
@@ -113,14 +130,18 @@ Downloading ██████████████████████�
     <div class="card"><h3>Time-limited links</h3><p>Pick how long the link lives with <code>-t</code>. Toss exits on its own when time runs out.</p></div>
     <div class="card"><h3>Streams large files</h3><p>Files are read from disk in chunks, so big files don't fill up memory. Interrupted downloads can resume.</p></div>
     <div class="card"><h3>Live transfer view</h3><p>See who is downloading, from which app, with progress, speed and time left, refreshed every 3 seconds.</p></div>
-    <div class="card"><h3>Activity log</h3><p><code>toss logs</code> shows what you shared, who downloaded it, and whether the download finished.</p></div>
+    <div class="card"><h3>Folders, zipped for you</h3><p>Share a whole folder. Toss asks, zips it to a temp file, and cleans it up when it exits.</p></div>
+    <div class="card"><h3>Pull with Toss</h3><p><code>toss pull &lt;link&gt;</code> downloads into Toss's own downloads folder with progress and resume.</p></div>
+    <div class="card"><h3>Activity log</h3><p><code>toss logs</code> shows what you shared, who downloaded it, what you pulled, and whether each transfer finished.</p></div>
   </div>
 
   <h2>Options</h2>
-  <pre><code>toss [-t seconds] [-p port] [-q] &lt;file&gt;  <span class="c"># share a file (default 300s, port 8080; -q hides the live view)</span>
-toss logs [-n count] [-path] [-clear] <span class="c"># show recent activity</span>
-toss update [-check] [-y]            <span class="c"># update to the latest release</span>
-toss -v                              <span class="c"># show version</span></code></pre>
+  <pre><code>toss [-t seconds] [-p port] [-q] [-y] &lt;file|folder&gt;  <span class="c"># share (default 300s, port 8080; -q hides the live view, -y zips folders without asking)</span>
+toss pull &lt;link&gt;                                     <span class="c"># download into toss's downloads folder</span>
+toss stream &lt;link&gt;                                   <span class="c"># same as toss pull</span>
+toss logs [-n count] [-path] [-clear]                <span class="c"># show recent activity</span>
+toss update [-check] [-y]                            <span class="c"># update to the latest release</span>
+toss -v                                              <span class="c"># show version</span></code></pre>
 
   <h2>Screenshot</h2>
   <img class="shot" src="https://raw.githubusercontent.com/snyype/toss/main/toss-terminal.png" alt="Toss running in a terminal">

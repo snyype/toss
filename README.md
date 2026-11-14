@@ -10,6 +10,8 @@
 
 - **Instant Sharing**: Easily share files with others using a simple command.
 - **Time-Limited Access**: Control how long the shared file remains accessible.
+- **Folders**: Share a whole folder; Toss zips it for you after asking.
+- **Pull**: Download from another Toss with `toss pull <link>`, with progress and resume.
 - **User-Friendly**: Minimal setup and straightforward usage.
 
 ## Installation
@@ -31,9 +33,19 @@ Run the command with the desired file and an optional duration:
 toss -t 300 myfile.txt      # share for 300 seconds (5 minutes)
 toss myfile.txt -t 60       # flags can also go after the file
 toss -p 9000 myfile.txt     # use a different port (a free one is picked if busy)
+toss myfolder               # share a folder: asks, then zips it as myfolder.zip
+toss -y myfolder            # zip and share without asking
 ```
 
-Toss prints a download link. On the other device:
+When you share a folder, Toss zips it into a `temp` folder inside the Toss install directory (e.g. `C:\toss\temp` or `~/.local/bin/temp`) and deletes the zip when Toss exits. If Toss is killed before it can clean up, the next run removes the leftover. Your original folder is never modified.
+
+Toss prints a download link. On another device that has Toss, copy the green line:
+```
+toss pull http://<your-ip>:8080/<hostname>/download/myfile.txt     # `toss stream <link>` does the same
+```
+The file is saved to a `downloads` folder inside the Toss install directory (e.g. `C:\toss\downloads`), and the full path is printed when it finishes. If a file with that name is already there, the new one is saved as `myfile (1).txt`. If the download is interrupted (or you press Ctrl+C), run the same command again to resume.
+
+Without Toss on the other device:
 ```
 curl -o myfile.txt http://<your-ip>:8080/<hostname>/download/myfile.txt
 curl -C - -o myfile.txt http://<your-ip>:8080/<hostname>/download/myfile.txt   # resume an interrupted download

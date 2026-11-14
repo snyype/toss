@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var version = "2.1.0"
+var version = "2.2.0"
 
 // share describes the single file a toss process is serving.
 type share struct {
@@ -44,6 +44,8 @@ func main() {
 			os.Exit(runLogs(os.Args[2:]))
 		case "update":
 			os.Exit(runUpdate(os.Args[2:]))
+		case "pull", "stream":
+			os.Exit(runPull(os.Args[1], os.Args[2:]))
 		}
 	}
 	os.Exit(runShare())
@@ -53,7 +55,9 @@ func usage() {
 	out := flag.CommandLine.Output()
 	fmt.Fprintf(out, "toss %s - share a file over your local network\n\n", version)
 	fmt.Fprintln(out, "Usage:")
-	fmt.Fprintln(out, "  toss [-t seconds] [-p port] [-q] <file>  share a file")
+	fmt.Fprintln(out, "  toss [-t seconds] [-p port] [-q] [-y] <file|folder>  share a file (folders are zipped)")
+	fmt.Fprintln(out, "  toss pull <link>                     download a shared file into toss's downloads folder")
+	fmt.Fprintln(out, "  toss stream <link>                   same as toss pull")
 	fmt.Fprintln(out, "  toss logs [-n count] [-path] [-clear] show recent shares and downloads")
 	fmt.Fprintln(out, "  toss update [-check] [-y]            update toss to the latest release")
 	fmt.Fprintln(out, "  toss -v                              show version")
@@ -67,11 +71,13 @@ func runShare() int {
 		port        int
 		showVersion bool
 		quiet       bool
+		assumeYes   bool
 	)
 	flag.IntVar(&duration, "t", 300, "how long the link stays valid, in seconds")
 	flag.IntVar(&port, "p", 8080, "port to listen on (a free port is picked if it is busy)")
 	flag.BoolVar(&showVersion, "v", false, "show version")
 	flag.BoolVar(&quiet, "q", false, "hide the live transfer view (refreshed every 3s)")
+	flag.BoolVar(&assumeYes, "y", false, "zip and share a folder without asking first")
 	flag.Usage = usage
 
 	// Allow flags after the filename too, e.g. `toss file.txt -t 60`.
@@ -88,7 +94,7 @@ func runShare() int {
 		if len(args) == 0 {
 			fmt.Fprintln(os.Stderr, "Error: no file given. Usage: toss [-t seconds] <file>")
 		} else {
-			fmt.Fprintln(os.Stderr, "Error: toss shares one file at a time. Zip multiple files first.")
+			fmt.Fprintln(os.Stderr, "Error: toss shares one file at a time. Put them in a folder and share the folder instead.")
 		}
 		return 2
 	}
@@ -115,9 +121,18 @@ func runShare() int {
 		}
 		return 1
 	}
+	sourcePath := absPath // what the user asked to share (a folder gets zipped)
 	if info.IsDir() {
-		fmt.Fprintf(os.Stderr, "Error: %s is a folder. toss shares single files; zip the folder first.\n", args[0])
-		return 1
+		zipPath, cleanup, code := shareFolder(absPath, assumeYes)
+		defer cleanup()
+		if code >= 0 {
+			return code
+		}
+		absPath = zipPath
+		if info, err = os.Stat(zipPath); err != nil {
+			fmt.Fprintln(os.Stderr, "Error: cannot access the zip:", err)
+			return 1
+		}
 	}
 	// Make sure we can actually read it before handing out a link.
 	if f, err := os.Open(absPath); err != nil {
@@ -160,7 +175,7 @@ func runShare() int {
 	link := fmt.Sprintf("http://%s:%d%s", primary, actualPort, escapedPath)
 
 	logger := openLogger()
-	logger.write(logEntry{Event: "share", File: s.name, Path: s.path, Bytes: s.size, URL: link, Duration: duration})
+	logger.write(logEntry{Event: "share", File: s.name, Path: sourcePath, Bytes: s.size, URL: link, Duration: duration})
 
 	srv := &http.Server{
 		Handler:           s.handler(logger),
@@ -174,6 +189,7 @@ func runShare() int {
 
 	fmt.Printf("Sharing %s (%s) for %s.\n", s.name, humanBytes(s.size), time.Duration(duration)*time.Second)
 	fmt.Println("Download it from another device on the same network with:")
+	fmt.Printf("  %s\n", green("toss pull "+link))
 	fmt.Printf("  curl -o %q %s\n", s.name, link)
 	fmt.Printf("  or open in a browser: %s\n", link)
 	if len(others) > 0 {
