@@ -4,8 +4,9 @@ name: Release & Pages
 #   - checks the code builds on every platform
 #   - deploys docs/ to GitHub Pages
 #   - if the version in main.go has no release yet, builds the binaries and
-#     publishes win-<v>, linux-<v> and darwin-<v> releases (the tag scheme
-#     `toss update` and install.sh look for)
+#     publishes a combined v<v> release (all binaries, marked latest - what
+#     install.sh downloads) plus win-<v>, linux-<v> and darwin-<v> releases
+#     (the tag scheme `toss update` looks for)
 # Merging without bumping `version` in main.go only redeploys the site.
 
 on:
@@ -109,6 +110,15 @@ jobs:
           build linux   arm64 dist/linux/toss-arm64
           build darwin  amd64 dist/darwin/toss
           build darwin  arm64 dist/darwin/toss-arm64
+          # Combined release: one file per platform, named by OS and CPU.
+          mkdir -p dist/all
+          cp dist/win/toss.exe          dist/all/toss-windows-amd64.exe
+          cp dist/win/toss-arm64.exe    dist/all/toss-windows-arm64.exe
+          cp dist/linux/toss            dist/all/toss-linux-amd64
+          cp dist/linux/toss-arm64      dist/all/toss-linux-arm64
+          cp dist/darwin/toss           dist/all/toss-darwin-amd64
+          cp dist/darwin/toss-arm64     dist/all/toss-darwin-arm64
+          (cd dist/all && sha256sum toss-* > ../checksums.txt) && mv dist/checksums.txt dist/all/
           ls -l dist/*
 
       - name: Release notes
@@ -136,4 +146,7 @@ jobs:
           V=${{ steps.version.outputs.version }}
           gh release create "linux-$V"  dist/linux/*  --target "$GITHUB_SHA" --title "Linux v$V"   --notes-file notes.md --latest=false
           gh release create "darwin-$V" dist/darwin/* --target "$GITHUB_SHA" --title "macOS v$V"   --notes-file notes.md --latest=false
-          gh release create "win-$V"    dist/win/*    --target "$GITHUB_SHA" --title "Windows v$V" --notes-file notes.md --latest
+          gh release create "win-$V"    dist/win/*    --target "$GITHUB_SHA" --title "Windows v$V" --notes-file notes.md --latest=false
+          # Combined release with every binary; marked latest so install.sh can use
+          # /releases/latest/download/toss-<os>-<arch> without the rate-limited API.
+          gh release create "v$V"       dist/all/*    --target "$GITHUB_SHA" --title "Toss v$V"    --notes-file notes.md --latest
