@@ -79,7 +79,7 @@ Releases and the website are automated by `.github/workflows/release.yml`. On ev
 
 1. The code is checked (gofmt, `go vet` for Linux, macOS and Windows).
 2. `docs/` is deployed to GitHub Pages.
-3. If the `version` in `main.go` has no release yet, binaries are built for Windows, Linux and macOS (amd64 + arm64), the Windows icon/version info is regenerated, and `win-<version>`, `linux-<version>` and `darwin-<version>` releases are published with notes from the commit messages.
+3. If the `version` in `main.go` has no release yet, binaries are built for Windows, Linux and macOS (amd64 + arm64), the Windows icon/version info is regenerated, and a combined `v<version>` release (marked latest, with `toss-<os>-<arch>` binaries that `install.sh` downloads) plus `win-<version>`, `linux-<version>` and `darwin-<version>` releases (used by `toss update`) are published with notes from the commit messages.
 
 So to ship a new version: bump `var version = "x.y.z"` in `main.go` and merge to `main`. `toss update` and `install.sh` pick it up automatically.
 
