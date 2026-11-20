@@ -25,13 +25,22 @@ import (
 // resuming a previous interrupted attempt if a .part file is there.
 func runPull(cmd string, args []string) int {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	conns := fs.Int("c", defaultPullConns, fmt.Sprintf("parallel connections to download with (1-%d)", maxPullConns))
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: toss %s <link>\n\n", cmd)
+		fmt.Fprintf(fs.Output(), "Usage: toss %s [-c connections] <link>\n\n", cmd)
 		fmt.Fprintln(fs.Output(), "Downloads a file shared with toss into toss's downloads folder.")
 		fmt.Fprintln(fs.Output(), "Paste the link printed by `toss <file>` on the other machine.")
+		fmt.Fprintln(fs.Output(), "Dropped connections are retried automatically; if it still stops,")
+		fmt.Fprintln(fs.Output(), "run the same command again to resume.")
+		fmt.Fprintln(fs.Output())
+		fs.PrintDefaults()
 	}
 	rest, err := parseInterspersed(fs, args)
 	if err != nil {
+		return 2
+	}
+	if *conns < 1 || *conns > maxPullConns {
+		fmt.Fprintf(os.Stderr, "Error: -c must be between 1 and %d.\n", maxPullConns)
 		return 2
 	}
 	if len(rest) != 1 {
@@ -73,7 +82,7 @@ func runPull(cmd string, args []string) int {
 	part := filepath.Join(dir, name+".part")
 	start := time.Now()
 
-	res, err := fetch(ctx, u.String(), part)
+	res, err := fetch(ctx, u.String(), part, *conns)
 	elapsed := time.Since(start)
 	if err != nil {
 		status := "failed"
@@ -106,6 +115,7 @@ func runPull(cmd string, args []string) int {
 		return 1
 	}
 
+	notifyDone(u.String(), *conns, elapsed)
 	logger.write(logEntry{Event: "pull", File: filepath.Base(final), Path: final, URL: link, Bytes: res.size,
 		Status: "completed", Elapsed: elapsed.Round(time.Millisecond).String()})
 	fmt.Printf("%s Downloaded %s (%s in %s, avg %s/s)\n", green("✓"), bold(filepath.Base(final)),
@@ -122,13 +132,10 @@ type fetchResult struct {
 	resumable bool   // a partial download is saved and can be resumed
 }
 
-// fetch downloads link into part, continuing from the bytes already in part.
-func fetch(ctx context.Context, link, part string) (fetchResult, error) {
+// fetchSingle downloads link into part over one connection, continuing from
+// the bytes already in part. Used when the server can't serve byte ranges.
+func fetchSingle(ctx context.Context, client *http.Client, link, part string) (fetchResult, error) {
 	var res fetchResult
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 30 * time.Second
-	// No overall timeout: large files must be able to stream for as long as they need.
-	client := &http.Client{Transport: transport}
 
 	for attempt := 0; ; attempt++ {
 		var offset int64
@@ -150,7 +157,7 @@ func fetch(ctx context.Context, link, part string) (fetchResult, error) {
 			if ctx.Err() != nil {
 				return res, ctx.Err()
 			}
-			return res, fmt.Errorf("cannot reach %s. Check that toss is still running on the other machine and that both are on the same network. (%v)", req.URL.Host, err)
+			return res, reachError(req, err)
 		}
 
 		if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable && attempt == 0 {
@@ -174,18 +181,9 @@ func fetch(ctx context.Context, link, part string) (fetchResult, error) {
 			flags |= os.O_APPEND
 			fmt.Printf("Resuming from %s...\n", humanBytes(offset))
 		default:
-			msg := readMessage(resp)
+			err := statusError(resp)
 			resp.Body.Close()
-			switch resp.StatusCode {
-			case http.StatusGone:
-				return res, errors.New("this link has expired. Ask the sender to run toss again")
-			case http.StatusNotFound:
-				return res, errors.New("nothing is shared at this link. Check the link, or ask the sender to run toss again")
-			}
-			if msg == "" {
-				msg = resp.Status
-			}
-			return res, fmt.Errorf("the sender refused the download: %s", msg)
+			return res, err
 		}
 
 		res.size = -1
@@ -203,7 +201,7 @@ func fetch(ctx context.Context, link, part string) (fetchResult, error) {
 		var got atomic.Int64
 		got.Store(offset)
 		stop := startPullProgress(&got, res.size)
-		n, copyErr := io.Copy(f, &countReader{r: resp.Body, n: &got})
+		n, copyErr := io.CopyBuffer(f, &countReader{r: resp.Body, n: &got}, make([]byte, copyBufSize))
 		stop()
 		resp.Body.Close()
 		closeErr := f.Close()

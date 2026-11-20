@@ -11,7 +11,7 @@
 - **Instant Sharing**: Easily share files with others using a simple command.
 - **Time-Limited Access**: Control how long the shared file remains accessible.
 - **Folders**: Share a whole folder; Toss zips it for you after asking.
-- **Pull**: Download from another Toss with `toss pull <link>`, with progress and resume.
+- **Pull**: Download from another Toss with `toss pull <link>`: parallel connections, automatic retry on dropped connections, progress and resume.
 - **User-Friendly**: Minimal setup and straightforward usage.
 
 ## Installation
@@ -44,6 +44,8 @@ Toss prints a download link. On another device that has Toss, copy the green lin
 toss pull http://<your-ip>:8080/<hostname>/download/myfile.txt     # `toss stream <link>` does the same
 ```
 The file is saved to a `downloads` folder inside the Toss install directory (e.g. `C:\toss\downloads`), and the full path is printed when it finishes. If a file with that name is already there, the new one is saved as `myfile (1).txt`. If the download is interrupted (or you press Ctrl+C), run the same command again to resume.
+
+`toss pull` downloads over 4 connections at once (change it with `-c`, e.g. `toss pull -c 8 <link>`, or `-c 1` for a single stream), which is usually faster on Wi-Fi and busy networks. Dropped connections are retried automatically, so a flaky link only slows the download down instead of stopping it.
 
 Without Toss on the other device:
 ```
