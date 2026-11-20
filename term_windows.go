@@ -25,3 +25,19 @@ func enableVirtualTerminal() bool {
 	r, _, _ := setMode.Call(uintptr(h), uintptr(mode|enableVTProcessing))
 	return r != 0
 }
+
+// termWidth returns the console window's column count, or 0 if unknown.
+func termWidth() int {
+	type coord struct{ X, Y int16 }
+	var info struct {
+		Size, Cursor             coord
+		Attributes               uint16
+		Left, Top, Right, Bottom int16
+		MaxWindowSize            coord
+	}
+	proc := syscall.NewLazyDLL("kernel32.dll").NewProc("GetConsoleScreenBufferInfo")
+	if r, _, _ := proc.Call(uintptr(syscall.Handle(os.Stdout.Fd())), uintptr(unsafe.Pointer(&info))); r == 0 {
+		return 0
+	}
+	return int(info.Right-info.Left) + 1
+}

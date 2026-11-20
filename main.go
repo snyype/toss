@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var version = "2.2.1"
+var version = "2.3.0"
 
 // share describes the single file a toss process is serving.
 type share struct {
@@ -56,7 +56,7 @@ func usage() {
 	fmt.Fprintf(out, "toss %s - share a file over your local network\n\n", version)
 	fmt.Fprintln(out, "Usage:")
 	fmt.Fprintln(out, "  toss [-t seconds] [-p port] [-q] [-y] <file|folder>  share a file (folders are zipped)")
-	fmt.Fprintln(out, "  toss pull <link>                     download a shared file into toss's downloads folder")
+	fmt.Fprintln(out, "  toss pull [-c n] <link>              download a shared file into toss's downloads folder")
 	fmt.Fprintln(out, "  toss stream <link>                   same as toss pull")
 	fmt.Fprintln(out, "  toss logs [-n count] [-path] [-clear] show recent shares and downloads")
 	fmt.Fprintln(out, "  toss update [-check] [-y]            update toss to the latest release")
@@ -76,7 +76,7 @@ func runShare() int {
 	flag.IntVar(&duration, "t", 300, "how long the link stays valid, in seconds")
 	flag.IntVar(&port, "p", 8080, "port to listen on (a free port is picked if it is busy)")
 	flag.BoolVar(&showVersion, "v", false, "show version")
-	flag.BoolVar(&quiet, "q", false, "hide the live transfer view (refreshed every 3s)")
+	flag.BoolVar(&quiet, "q", false, "hide the live transfer view (refreshed every second)")
 	flag.BoolVar(&assumeYes, "y", false, "zip and share a folder without asking first")
 	flag.Usage = usage
 
@@ -268,6 +268,14 @@ func (s *share) handler(logger *logger) http.Handler {
 			http.Error(w, "Method not allowed.", http.StatusMethodNotAllowed)
 			return
 		}
+		// `toss pull` downloads over several connections (X-Toss-Part) and
+		// reports the start and the end of the whole pull with HEAD requests,
+		// so it shows up as one download instead of one per connection.
+		if r.Method == http.MethodHead && r.Header.Get("X-Toss-Event") == "done" {
+			s.pullDone(r, logger)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if time.Now().After(s.expiresAt) {
 			http.Error(w, "This link has expired. Ask the sender to run toss again (use -t to share for longer, e.g. toss -t 600 <file>).", http.StatusGone)
 			return
@@ -290,6 +298,14 @@ func (s *share) handler(logger *logger) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 
 		if r.Method == http.MethodHead {
+			if r.Header.Get("X-Toss-Event") == "start" {
+				ip := clientIP(r)
+				conns, _ := strconv.Atoi(r.Header.Get("X-Toss-Conns"))
+				have, _ := strconv.ParseInt(r.Header.Get("X-Toss-Have"), 10, 64)
+				s.track.startPull(ip, shortAgent(r.UserAgent()), conns, have)
+				s.out.event("[%s] %s started downloading with %s%s\n", time.Now().Format("15:04:05"), ip,
+					shortAgent(r.UserAgent()), connsNote(r))
+			}
 			http.ServeContent(w, r, s.name, info.ModTime(), f)
 			return
 		}
@@ -303,8 +319,13 @@ func (s *share) handler(logger *logger) http.Handler {
 		defer s.track.end(tr)
 		client := tr.client
 		start := tr.start
-		cw := &countingWriter{ResponseWriter: w, tr: tr, served: &s.track.served}
-		s.out.event("[%s] %s started downloading with %s%s\n", start.Format("15:04:05"), client, tr.agent, rangeNote(r))
+		cw := &countingWriter{ResponseWriter: w, tr: tr, track: s.track}
+		// One connection of a parallel `toss pull`: shown live on the dashboard,
+		// but logged and counted once, when the client reports the pull is done.
+		pullPart := r.Header.Get("X-Toss-Part") != ""
+		if !pullPart {
+			s.out.event("[%s] %s started downloading with %s%s\n", start.Format("15:04:05"), client, tr.agent, rangeNote(r))
+		}
 
 		// ServeContent streams the file from disk in chunks (never loads it into
 		// memory) and supports Range requests, so interrupted downloads can resume
@@ -324,8 +345,12 @@ func (s *share) handler(logger *logger) http.Handler {
 		case cw.status == http.StatusPartialContent:
 			status = "completed (range)"
 		}
+		if pullPart {
+			return
+		}
 		if strings.HasPrefix(status, "completed") {
 			s.downloads.Add(1)
+			s.track.completed.Add(1)
 		}
 
 		s.out.event("[%s] %s %s: %s in %s (avg %s/s)\n", time.Now().Format("15:04:05"), s.track.clientLabel(client), status,
@@ -335,11 +360,32 @@ func (s *share) handler(logger *logger) http.Handler {
 	})
 }
 
+// pullDone records a finished parallel `toss pull` as one completed download.
+func (s *share) pullDone(r *http.Request, logger *logger) {
+	s.downloads.Add(1)
+	s.track.completed.Add(1)
+	client := clientIP(r)
+	s.track.endPull(client)
+	ms, _ := strconv.ParseInt(r.Header.Get("X-Toss-Elapsed"), 10, 64)
+	elapsed := time.Duration(ms) * time.Millisecond
+	s.out.event("[%s] %s completed: %s in %s (avg %s/s)%s\n", time.Now().Format("15:04:05"), s.track.clientLabel(client),
+		humanBytes(s.size), elapsed.Round(time.Millisecond), humanBytes(rate(s.size, elapsed)), connsNote(r))
+	logger.write(logEntry{Event: "download", File: s.name, Client: client, Bytes: s.size,
+		Status: "completed" + connsNote(r), Elapsed: elapsed.Round(time.Millisecond).String()})
+}
+
+func connsNote(r *http.Request) string {
+	if n, err := strconv.Atoi(r.Header.Get("X-Toss-Conns")); err == nil && n > 1 {
+		return fmt.Sprintf(" (%d connections)", n)
+	}
+	return ""
+}
+
 type countingWriter struct {
 	http.ResponseWriter
 	status int
 	tr     *transfer
-	served *atomic.Int64
+	track  *tracker
 }
 
 func (c *countingWriter) sent() int64 { return c.tr.sent.Load() }
@@ -360,7 +406,14 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	}
 	n, err := c.ResponseWriter.Write(p)
 	c.tr.sent.Add(int64(n))
-	c.served.Add(int64(n))
+	c.tr.writes.Add(1)
+	c.tr.lastByte.Store(time.Now().UnixNano())
+	if c.tr.pull != nil {
+		c.tr.pull.sent.Add(int64(n))
+		c.tr.pull.writes.Add(1)
+	}
+	c.track.served.Add(int64(n))
+	c.track.writes.Add(1)
 	return n, err
 }
 
