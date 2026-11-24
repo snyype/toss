@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var version = "2.3.0"
+var version = "2.3.1"
 
 // share describes the single file a toss process is serving.
 type share struct {

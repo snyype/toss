@@ -137,6 +137,10 @@ jobs:
             echo '```'
             echo 'curl -o- https://raw.githubusercontent.com/snyype/toss/main/install.sh | bash'
             echo '```'
+            echo 'Windows (PowerShell):'
+            echo '```'
+            echo 'irm https://raw.githubusercontent.com/snyype/toss/main/install.ps1 | iex'
+            echo '```'
           } > notes.md
           cat notes.md
 

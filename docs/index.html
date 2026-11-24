@@ -77,6 +77,10 @@
   <h2 id="install">Install</h2>
   <p>macOS, Linux and Windows (Git Bash):</p>
   <pre><code><span class="p">$ </span>curl -o- https://raw.githubusercontent.com/snyype/toss/main/install.sh | bash</code></pre>
+  <p>Windows PowerShell:</p>
+  <pre><code><span class="p">PS&gt; </span>irm https://raw.githubusercontent.com/snyype/toss/main/install.ps1 | iex</code></pre>
+  <p>Windows cmd:</p>
+  <pre><code><span class="p">&gt; </span>powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;irm https://raw.githubusercontent.com/snyype/toss/main/install.ps1 | iex&quot;</code></pre>
 
   <h2>Share a file</h2>
   <pre><code><span class="p">$ </span>toss -t 300 report.pdf
