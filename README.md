@@ -16,11 +16,25 @@
 
 ## Installation
 
-You can install Toss with the following command:
+**macOS / Linux / Git Bash:**
 
 ```
 curl -o- https://raw.githubusercontent.com/snyype/toss/main/install.sh | bash
 ```
+
+**Windows PowerShell:**
+
+```
+irm https://raw.githubusercontent.com/snyype/toss/main/install.ps1 | iex
+```
+
+**Windows cmd:**
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/snyype/toss/main/install.ps1 | iex"
+```
+
+On Windows, Toss is installed to `C:\toss` and added to your user PATH (no admin needed).
 
 # Usage
 Run the command with the desired file and an optional duration:
@@ -81,9 +95,9 @@ Releases and the website are automated by `.github/workflows/release.yml`. On ev
 
 1. The code is checked (gofmt, `go vet` for Linux, macOS and Windows).
 2. `docs/` is deployed to GitHub Pages.
-3. If the `version` in `main.go` has no release yet, binaries are built for Windows, Linux and macOS (amd64 + arm64), the Windows icon/version info is regenerated, and a combined `v<version>` release (marked latest, with `toss-<os>-<arch>` binaries that `install.sh` downloads) plus `win-<version>`, `linux-<version>` and `darwin-<version>` releases (used by `toss update`) are published with notes from the commit messages.
+3. If the `version` in `main.go` has no release yet, binaries are built for Windows, Linux and macOS (amd64 + arm64), the Windows icon/version info is regenerated, and a combined `v<version>` release (marked latest, with `toss-<os>-<arch>` binaries that `install.sh` and `install.ps1` download) plus `win-<version>`, `linux-<version>` and `darwin-<version>` releases (used by `toss update`) are published with notes from the commit messages.
 
-So to ship a new version: bump `var version = "x.y.z"` in `main.go` and merge to `main`. `toss update` and `install.sh` pick it up automatically.
+So to ship a new version: bump `var version = "x.y.z"` in `main.go` and merge to `main`. `toss update`, `install.sh` and `install.ps1` pick it up automatically.
 
 One-time setup: in the repo go to **Settings → Pages** and set **Source** to **GitHub Actions**.
 
